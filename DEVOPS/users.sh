@@ -1,16 +1,17 @@
-#!/bin/bash                       
+#!/bin/bash
 
 # ================================
 # Linux User & Group Management Script
-# Provides menu-based user/group management with logging and input validation.
+# Provides menu-based user/group management with logging, input validation, and colored output.
 # Passwords expire after 45 days for created users.
+# Additional options to list users and groups are provided.
 # ================================
 
 # ---------- Color Variables ----------
 RED='\033[0;31m'      # Error messages
 GREEN='\033[0;32m'    # Success messages
-CYAN='\033[0;36m'     # Menu headers
-YELLOW='\033[1;33m'   # Warnings/prompts
+CYAN='\033[0;36m'     # Menu headers / informational output
+YELLOW='\033[1;33m'   # Prompts / menu numbering
 RESET='\033[0m'       # Reset to default color
 
 # ---------- Log File Path ----------
@@ -24,14 +25,13 @@ fi
 
 # ---------- Logging Function ----------
 log() {
-    # Appends timestamped log messages to the log file
+    # Append timestamped log messages to the log file for auditing purposes.
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
 }
 
 # ---------- Create User Function ----------
 create_user() {
     read -p "Enter new username: " username
-
     # Check if the user already exists
     if id "$username" &>/dev/null; then
         echo -e "${RED}User '$username' already exists.${RESET}"
@@ -39,27 +39,27 @@ create_user() {
         return
     fi
 
-    # Ask for shell, default to /bin/bash
+    # Ask for shell, default to /bin/bash if no input provided
     read -p "Enter shell [/bin/bash]: " shell
     shell=${shell:-/bin/bash}
 
-    # Securely input password twice
+    # Securely input password twice for confirmation
     read -s -p "Enter initial password: " password
     echo
     read -s -p "Confirm password: " password_confirm
     echo
-
     if [[ "$password" != "$password_confirm" ]]; then
         echo -e "${RED}Passwords do not match.${RESET}"
         log "Password mismatch while creating user '$username'"
         return
     fi
 
-    # Create the user
+    # Create the new user with the specified shell and a home directory.
     useradd -m -s "$shell" "$username"
     if [[ $? -eq 0 ]]; then
+        # Set the user's password and enforce password expiration after 45 days.
         echo "$username:$password" | chpasswd
-        chage -M 45 "$username"  # Set password to expire every 45 days
+        chage -M 45 "$username"
         echo -e "${GREEN}User '$username' created. Password expires in 45 days.${RESET}"
         log "User '$username' created with shell '$shell' and 45-day password expiry"
     else
@@ -71,7 +71,6 @@ create_user() {
 # ---------- Delete User Function ----------
 delete_user() {
     read -p "Enter username to delete: " username
-
     if ! id "$username" &>/dev/null; then
         echo -e "${RED}User '$username' does not exist.${RESET}"
         log "Failed to delete user '$username': does not exist"
@@ -97,7 +96,7 @@ delete_user() {
 # ---------- Create Group Function ----------
 create_group() {
     read -p "Enter group name to create: " group
-
+    # Check if the group already exists
     if getent group "$group" &>/dev/null; then
         echo -e "${RED}Group '$group' already exists.${RESET}"
         log "Failed to create group '$group': already exists"
@@ -117,7 +116,6 @@ create_group() {
 # ---------- Delete Group Function ----------
 delete_group() {
     read -p "Enter group name to delete: " group
-
     if ! getent group "$group" &>/dev/null; then
         echo -e "${RED}Group '$group' does not exist.${RESET}"
         log "Failed to delete group '$group': does not exist"
@@ -172,10 +170,9 @@ remove_user_from_group() {
         return
     fi
 
-    # Remove group from user's list of groups
+    # Remove specified group from the user's current group list.
     current_groups=$(id -nG "$username" | sed "s/\b$group\b//g" | xargs)
     usermod -G "$current_groups" "$username"
-
     if [[ $? -eq 0 ]]; then
         echo -e "${GREEN}User '$username' removed from group '$group'.${RESET}"
         log "User '$username' removed from group '$group'"
@@ -183,6 +180,22 @@ remove_user_from_group() {
         echo -e "${RED}Failed to remove user from group.${RESET}"
         log "Failed to remove user '$username' from group '$group'"
     fi
+}
+
+# ---------- List Users Function ----------
+list_users() {
+    echo -e "${CYAN}Listing non-system users (UID >= 1000):${RESET}"
+    # Filter /etc/passwd to list users with UID >= 1000 (excluding 'nobody'). Adjust if needed.
+    awk -F: '$3>=1000 && $1!="nobody" {print $1}' /etc/passwd
+    log "Listed users"
+}
+
+# ---------- List Groups Function ----------
+list_groups() {
+    echo -e "${CYAN}Listing groups (GID >= 1000):${RESET}"
+    # Filter /etc/group to list groups with GID >= 1000. Adjust filtering criteria if necessary.
+    awk -F: '$3>=1000 {print $1}' /etc/group
+    log "Listed groups"
 }
 
 # ---------- Menu Interface Loop ----------
@@ -194,8 +207,10 @@ while true; do
     echo -e "${YELLOW}4.${RESET} Delete Group"
     echo -e "${YELLOW}5.${RESET} Add User to Group"
     echo -e "${YELLOW}6.${RESET} Remove User from Group"
-    echo -e "${YELLOW}7.${RESET} Exit"
-    read -p "Choose an option [1-7]: " choice
+    echo -e "${YELLOW}7.${RESET} List Users"
+    echo -e "${YELLOW}8.${RESET} List Groups"
+    echo -e "${YELLOW}9.${RESET} Exit"
+    read -p "Choose an option [1-9]: " choice
 
     case $choice in
         1) create_user ;;
@@ -204,7 +219,9 @@ while true; do
         4) delete_group ;;
         5) add_user_to_group ;;
         6) remove_user_from_group ;;
-        7) echo -e "${CYAN}Exiting...${RESET}"; break ;;
+        7) list_users ;;
+        8) list_groups ;;
+        9) echo -e "${CYAN}Exiting...${RESET}"; break ;;
         *) echo -e "${RED}Invalid choice. Please choose again.${RESET}" ;;
     esac
 done
